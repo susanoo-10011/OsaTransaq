@@ -1962,6 +1962,7 @@ namespace OsEngine.Market.Servers.Transaq
                             {
                                 // пришла новость с рынка
                                 //SendLogMessage(data, LogMessageType.Error);
+
                             }
                             else if (data.StartsWith("<markets>")
                                 || data.StartsWith("<boards>")
