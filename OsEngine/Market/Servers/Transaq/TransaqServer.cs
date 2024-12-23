@@ -7,7 +7,6 @@ using OsEngine.Entity;
 using OsEngine.Language;
 using OsEngine.Logging;
 using OsEngine.Market.Servers.Entity;
-using OsEngine.Market.Servers.MoexAlgopack.Entity;
 using OsEngine.Market.Servers.Transaq.TransaqEntity;
 using RestSharp;
 using RestSharp.Deserializers;
@@ -23,7 +22,6 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Xml;
 using System.Xml.Serialization;
-using static System.Windows.Forms.VisualStyles.VisualStyleElement.TrackBar;
 using Candle = OsEngine.Entity.Candle;
 using Order = OsEngine.Entity.Order;
 using Security = OsEngine.Entity.Security;
@@ -67,19 +65,17 @@ namespace OsEngine.Market.Servers.Transaq
     public class TransaqServerRealization : IServerRealization
     {
         #region 1 Constructor, Status, Connection
-
-        delegate bool CallBackDelegate(IntPtr pData);
-        private CallBackDelegate _myCallbackDelegate;
-
+        
         public TransaqServerRealization()
         {
             ServerStatus = ServerConnectStatus.Disconnect;
 
             _deserializer = new XmlDeserializer();
             _logPath = AppDomain.CurrentDomain.BaseDirectory + @"Engine\TransaqLog";
+
             DirectoryInfo dirInfo = new DirectoryInfo(_logPath);
 
-             _myCallbackDelegate = new CallBackDelegate(CallBackDataHandler);
+            _myCallbackDelegate = new CallBackDelegate(CallBackDataHandler);
             SetCallback(_myCallbackDelegate);
 
             if (!dirInfo.Exists)
@@ -119,6 +115,12 @@ namespace OsEngine.Market.Servers.Transaq
 
         public ServerConnectStatus ServerStatus { get; set; }
 
+        private readonly string _logPath;
+
+        delegate bool CallBackDelegate(IntPtr pData);
+
+        private CallBackDelegate _myCallbackDelegate;
+
         private CancellationTokenSource _cancellationTokenSource;
 
         private CancellationToken _cancellationToken;
@@ -141,6 +143,8 @@ namespace OsEngine.Market.Servers.Transaq
 
             try
             {
+                _isDisposed = false;
+
                 ConnectorInitialize();
 
                 // formation of the command text / формирование текста команды
@@ -161,14 +165,9 @@ namespace OsEngine.Market.Servers.Transaq
                 SendLogMessage(e.ToString(), LogMessageType.Error);
             }
 
-            //_client.Connected += _client_Connected;
-            //_client.Disconnected += _client_Disconnected;
-            //_client.LogMessageEvent += SendLogMessage;
-
             _cancellationTokenSource = new CancellationTokenSource();
 
             _cancellationToken = _cancellationTokenSource.Token;
-
         }
 
         /// <summary>
@@ -227,42 +226,54 @@ namespace OsEngine.Market.Servers.Transaq
 
         public void Dispose()
         {
-            if (ServerStatus != ServerConnectStatus.Disconnect)
-            {
-                ServerStatus = ServerConnectStatus.Disconnect;
-                DisconnectEvent();
-            }
-
             try
             {
-                Disconnect();
-                Thread.Sleep(2000);
-                bool res = ConnectorUnInitialize();
-
-                if (res)
+                if (ServerStatus == ServerConnectStatus.Connect)
                 {
-                    _client_Disconnected();
+                    Disconnect();
+                    Thread.Sleep(2000);
+                    bool res = ConnectorUnInitialize();
+
+                    if (res)
+                    {
+                        Disconnected();
+                    }
                 }
             }
             catch (Exception e)
             {
                 SendLogMessage(e.ToString(), LogMessageType.Error);
             }
+            finally
+            {
+                _isDisposed = true;
 
-            _depths?.Clear();
+                _depths?.Clear();
 
-            _depths = null;
+                _depths = null;
 
-            _allCandleSeries?.Clear();
+                _allCandleSeries?.Clear();
 
-            _cancellationTokenSource?.Cancel();
+                _cancellationTokenSource?.Cancel();
 
-            _transaqSecuritiesInString = new ConcurrentQueue<string>();
+                _allTicks?.Clear(); //???
 
-            _securities = new List<Security>();
+                _transaqSecuritiesInString = new ConcurrentQueue<string>();
 
-            _subscribeSecurities = new List<Security>();
+                _securities = new List<Security>();
 
+                _subscribeSecurities = new List<Security>();
+
+                _mdQueue = new ConcurrentQueue<List<Quote>>();
+
+                _myTradesQueue = new ConcurrentQueue<List<TransaqEntity.Trade>>();
+
+                _newMessage = new ConcurrentQueue<string>();
+
+                _tradesQueue = new ConcurrentQueue<List<TransaqEntity.Trade>>();
+
+                _ordersQueue = new ConcurrentQueue<List<TransaqEntity.Order>>();
+            }
         }
 
         /// <summary>
@@ -295,6 +306,8 @@ namespace OsEngine.Market.Servers.Transaq
             }
         }
 
+        private bool _isDisposed = false;
+
         public event Action ConnectEvent;
 
         public event Action DisconnectEvent;
@@ -302,8 +315,6 @@ namespace OsEngine.Market.Servers.Transaq
         #endregion
 
         #region 2 Properties
-
-        private readonly string _logPath;
 
         private bool _useStock = false;
 
@@ -315,16 +326,11 @@ namespace OsEngine.Market.Servers.Transaq
 
         private bool _useOther = false;
 
-
-        private readonly XmlDeserializer _deserializer;
-
         #endregion
 
         #region 3 Client to Transaq
 
-        //private TransaqClient _client;
-
-        void _client_Connected()
+        void Connected()
         {
             SendLogMessage("Transaq client activated ", LogMessageType.System);
 
@@ -337,7 +343,7 @@ namespace OsEngine.Market.Servers.Transaq
             }
         }
 
-        void _client_Disconnected()
+        void Disconnected()
         {
             SendLogMessage("Transaq client disconnected ", LogMessageType.System);
 
@@ -348,9 +354,10 @@ namespace OsEngine.Market.Servers.Transaq
             }
         }
 
-        private void _client_NeedChangePassword()
+        private void NeedChangePassword()
         {
-            Application.Current.Dispatcher.Invoke((Action)delegate {
+            Application.Current.Dispatcher.Invoke((Action)delegate
+            {
                 string message = OsLocalization.Market.Message94;
 
                 ChangeTransaqPassword changeTransaqPasswordWindow = new ChangeTransaqPassword(message, this);
@@ -411,7 +418,7 @@ namespace OsEngine.Market.Servers.Transaq
 
         private List<SecurityInfo> _secsSpecification = new List<SecurityInfo>();
 
-        private void _client_UpdateSecurity(SecurityInfo secs)
+        private void UpdateSecurity(SecurityInfo secs)
         {
             _lastUpdateSecurityArrayTime = DateTime.Now;
 
@@ -471,11 +478,6 @@ namespace OsEngine.Market.Servers.Transaq
                     }
                 }
             }
-        }
-
-        private void _client_ClientOnUpdatePairs(string securities)
-        {
-            
         }
 
         private DateTime _lastUpdateSecurityArrayTime;
@@ -862,7 +864,7 @@ namespace OsEngine.Market.Servers.Transaq
 
         private List<Client> _clients;
 
-        private void _client_ClientsInfoUpdate(Client clientInfo)
+        private void ClientsInfoUpdate(Client clientInfo)
         {
             try
             {
@@ -891,7 +893,7 @@ namespace OsEngine.Market.Servers.Transaq
             }
         }
 
-        private void _client_ClientOnUpdatePortfolio(string portfolio)
+        private void UpdateClientPortfolio(string portfolio)
         {
             try
             {
@@ -999,7 +1001,7 @@ namespace OsEngine.Market.Servers.Transaq
             return portfolio;
         }
 
-        private void _client_ClientOnUpdateLimits(ClientLimits clientLimits)
+        private void UpdateClientLimits(ClientLimits clientLimits)
         {
             try
             {
@@ -1034,7 +1036,7 @@ namespace OsEngine.Market.Servers.Transaq
             return portfolio;
         }
 
-        private void _client_ClientOnUpdatePositions(TransaqPositions transaqPositions)
+        private void UpdateClientPositions(TransaqPositions transaqPositions)
         {
             if (_portfolios == null)
             {
@@ -1283,7 +1285,7 @@ namespace OsEngine.Market.Servers.Transaq
                     {
                         if (series.CandlesAll[i].Open == 0
                             || series.CandlesAll[i].High == 0
-                            || series.CandlesAll[i].Low == 0 
+                            || series.CandlesAll[i].Low == 0
                             || series.CandlesAll[i].Close == 0)
                         {
                             series.CandlesAll.RemoveAt(i);
@@ -1345,7 +1347,7 @@ namespace OsEngine.Market.Servers.Transaq
         {
             List<Candle> newCandles = new List<Candle>();
 
-            if(oldCandles == null ||
+            if (oldCandles == null ||
                 oldCandles.Count == 0)
             {
                 return newCandles;
@@ -1406,7 +1408,7 @@ namespace OsEngine.Market.Servers.Transaq
                 index = oldCandles.FindIndex(can => can.TimeStart.Minute % needTf == 0);
             }
 
-            if(index < 0)
+            if (index < 0)
             {
                 index = 0;
             }
@@ -1534,11 +1536,6 @@ namespace OsEngine.Market.Servers.Transaq
         }
 
         private List<TransaqEntity.Candles> _allCandleSeries = new List<TransaqEntity.Candles>();
-
-        private void _client_ClientOnNewCandles(TransaqEntity.Candles candles)
-        {
-            
-        }
 
         private List<Tick> _allTicks = new List<Tick>();
 
@@ -1790,10 +1787,9 @@ namespace OsEngine.Market.Servers.Transaq
 
         #endregion
 
+        #region 9 Parsing incomig data
 
-        #region Parsing incomig data
-
-        private readonly ConcurrentQueue<string> _newMessage = new ConcurrentQueue<string>();
+        private ConcurrentQueue<string> _newMessage = new ConcurrentQueue<string>();
 
         /// <summary>
         /// processor of data from callbacks 
@@ -1805,12 +1801,12 @@ namespace OsEngine.Market.Servers.Transaq
         {
             try
             {
-                //if (_isDisposed == false)
-                //{
+                if (_isDisposed == false)
+                {
                     string data = MarshalUtf8.PtrToStringUtf8(pData);
                     _newMessage.Enqueue(data);
                     FreeMemory(pData);
-                //}
+                }
 
                 return true;
             }
@@ -1869,13 +1865,13 @@ namespace OsEngine.Market.Servers.Transaq
                             }
                             else if (data.StartsWith("<mc_portfolio"))
                             {
-                                _client_ClientOnUpdatePortfolio(data);
+                                UpdateClientPortfolio(data);
                             }
                             else if (data.StartsWith("<positions"))
                             {
                                 TransaqPositions positions = Deserialize<TransaqPositions>(data);
 
-                                _client_ClientOnUpdatePositions(positions);
+                                UpdateClientPositions(positions);
                             }
                             else if (data.StartsWith("<trades>"))
                             {
@@ -1886,7 +1882,7 @@ namespace OsEngine.Market.Servers.Transaq
                             else if (data.StartsWith("<sec_info_upd>"))
                             {
                                 SecurityInfo newInfo = _deserializer.Deserialize<SecurityInfo>(new RestResponse() { Content = data }); ;
-                                _client_UpdateSecurity(newInfo);
+                                UpdateSecurity(newInfo);
                             }
                             else if (data.StartsWith("<securities>"))
                             {
@@ -1897,13 +1893,13 @@ namespace OsEngine.Market.Servers.Transaq
                             {
                                 ClientLimits limits = Deserialize<ClientLimits>(data);
 
-                                _client_ClientOnUpdateLimits(limits);
+                                UpdateClientLimits(limits);
                             }
                             else if (data.StartsWith("<client"))
                             {
                                 Client clientInfo = _deserializer.Deserialize<Client>(new RestResponse() { Content = data });
 
-                                _client_ClientsInfoUpdate(clientInfo);
+                                ClientsInfoUpdate(clientInfo);
                             }
                             else if (data.StartsWith("<candles"))
                             {
@@ -1915,15 +1911,13 @@ namespace OsEngine.Market.Servers.Transaq
                             {
                                 if (data.Contains("Время действия Вашего пароля истекло"))
                                 {
-                                    _client_NeedChangePassword();
+                                    NeedChangePassword();
 
-                                    _client_Disconnected(); //TODO: может диспос?
-
+                                    Disconnected();
                                 }
                             }
                             else if (data.StartsWith("<server_status"))
                             {
-
                                 ServerStatus status = Deserialize<ServerStatus>(data);
 
                                 if (status.Connected == "true")
@@ -1931,7 +1925,7 @@ namespace OsEngine.Market.Servers.Transaq
                                     if (ServerStatus == ServerConnectStatus.Disconnect
                                         && data.Contains("recover=\"true\"") == false)
                                     {
-                                        _client_Connected();
+                                        Connected();
                                     }
                                     else
                                     {
@@ -1939,19 +1933,19 @@ namespace OsEngine.Market.Servers.Transaq
                                         {
                                             SendLogMessage("Transaq client status error: <Reconnect>", LogMessageType.Error);
 
-                                            _client_Disconnected();
+                                            Disconnected();
                                         }
                                     }
                                 }
                                 else if (status.Connected == "false")
                                 {
-                                    _client_Disconnected();
+                                    Disconnected();
                                 }
                                 else if (status.Connected == "error")
                                 {
                                     SendLogMessage("Transaq client status error: " + status.Text, LogMessageType.Error);
 
-                                    _client_Disconnected();
+                                    Disconnected();
                                 }
                             }
                             else if (data.StartsWith("<error>"))
@@ -1973,7 +1967,7 @@ namespace OsEngine.Market.Servers.Transaq
                             {
                                 // do nothin
                             }
-                            else // if (data.StartsWith("<error>"))
+                            else
                             {
                                 SendLogMessage(data, LogMessageType.System);
                             }
@@ -1987,13 +1981,10 @@ namespace OsEngine.Market.Servers.Transaq
                 catch (Exception exception)
                 {
                     SendLogMessage(exception.ToString(), LogMessageType.Error);
+                    Thread.Sleep(5000);
                 }
             }
         }
-
-        #endregion
-
-        #region 9 Incoming streams data
 
         ConcurrentQueue<List<TransaqEntity.Order>> _ordersQueue = new ConcurrentQueue<List<TransaqEntity.Order>>();
 
@@ -2001,44 +1992,7 @@ namespace OsEngine.Market.Servers.Transaq
 
         ConcurrentQueue<List<TransaqEntity.Trade>> _tradesQueue = new ConcurrentQueue<List<TransaqEntity.Trade>>();
 
-
         ConcurrentQueue<List<Quote>> _mdQueue = new ConcurrentQueue<List<Quote>>();
-
-        
-
-        private void _client_ClientOnNewTradesEvent(List<TransaqEntity.Trade> trades)
-        {
-            if (ServerStatus == ServerConnectStatus.Disconnect)
-            {
-                return;
-            }
-
-            
-        }
-
-        private void _client_ClientOnUpdateMarketDepth(List<Quote> quotes)
-        {
-            if (ServerStatus == ServerConnectStatus.Disconnect)
-            {
-                return;
-            }
-
-            
-        }
-
-        private void _client_ClientOnMyOrderEvent(List<TransaqEntity.Order> orders)
-        {
-            
-        }
-
-        private void _client_ClientOnMyTradeEvent(List<TransaqEntity.Trade> trades)
-        {
-            
-        }
-
-        #endregion
-
-        #region 10 Incoming data parsing flow
 
         private void ThreadDataParsingWorkPlace()
         {
@@ -2267,6 +2221,7 @@ namespace OsEngine.Market.Servers.Transaq
             {
                 return;
             }
+
             if (_depths == null)
             {
                 _depths = new List<MarketDepth>();
@@ -2342,7 +2297,6 @@ namespace OsEngine.Market.Servers.Transaq
                                 needDepth.Asks.RemoveAt(0);
                             }
                         }
-
                     }
                     if (sortedQuote.Value[i].Sell > 0)
                     {
@@ -2412,7 +2366,6 @@ namespace OsEngine.Market.Servers.Transaq
                 }
 
                 _lastMdTime = needDepth.Time;
-
 
                 if (needDepth.Asks == null ||
                     needDepth.Asks.Count == 0 ||
@@ -2484,15 +2437,10 @@ namespace OsEngine.Market.Servers.Transaq
 
         #endregion
 
-        #region 11 Log messages
+        #region 10 Log messages
 
         private void SendLogMessage(string message, LogMessageType type)
         {
-            if (type == LogMessageType.Error)
-            {
-
-            }
-
             if (LogMessageEvent != null)
             {
                 LogMessageEvent(message, type);
@@ -2502,6 +2450,8 @@ namespace OsEngine.Market.Servers.Transaq
         public event Action<string, LogMessageType> LogMessageEvent;
 
         #endregion
+
+        #region 11 Queries
 
         private string _commandLocker = "commandSendLocker";
 
@@ -2541,6 +2491,12 @@ namespace OsEngine.Market.Servers.Transaq
             }
 
         }
+
+        #endregion
+
+        #region 12 Helpers
+
+        private readonly XmlDeserializer _deserializer;
 
         /// <summary>
         /// converts a string of data to needed format
@@ -2582,5 +2538,7 @@ namespace OsEngine.Market.Servers.Transaq
         [DllImport("TXmlConnector64.dll", CallingConvention = CallingConvention.Winapi)]
         private static extern IntPtr SetLogLevel(Int32 logLevel);
         //--------------------------------------------------------------------------------
+
+        #endregion
     }
 }

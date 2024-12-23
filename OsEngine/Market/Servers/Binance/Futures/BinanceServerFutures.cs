@@ -134,6 +134,7 @@ namespace OsEngine.Market.Servers.Binance.Futures
             _depths.Clear();
             _queuePrivateMessages = new ConcurrentQueue<BinanceUserMessage>();
             _queuePublicMessages = new ConcurrentQueue<string>();
+
         }
 
         public ServerType ServerType
