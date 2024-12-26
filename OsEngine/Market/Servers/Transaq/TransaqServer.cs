@@ -102,6 +102,10 @@ namespace OsEngine.Market.Servers.Transaq
             Thread worker5 = new Thread(Converter);
             worker5.Name = "TransaqThreadConverter";
             worker5.Start();
+
+            Thread worker6 = new Thread(ThreadUpdateSecurity);
+            worker6.Name = "TransaqThreadUpdateSecurity";
+            worker6.Start();
         }
 
         public ServerType ServerType
@@ -237,6 +241,8 @@ namespace OsEngine.Market.Servers.Transaq
         {
             try
             {
+                Disconnected();
+
                 if (_isLibraryInitialized == true)
                 {
                     Disconnect();
@@ -244,11 +250,6 @@ namespace OsEngine.Market.Servers.Transaq
                     bool res = ConnectorUnInitialize();
 
                     _isLibraryInitialized = !res;
-
-                    if (res)
-                    {
-                        Disconnected();
-                    }
                 }
             }
             catch (Exception e)
@@ -345,7 +346,7 @@ namespace OsEngine.Market.Servers.Transaq
         {
             SendLogMessage("Transaq client activated ", LogMessageType.System);
 
-            CreateSecurities();
+            //CreateSecurities();
 
             if (ServerStatus != ServerConnectStatus.Connect)
             {
@@ -358,7 +359,7 @@ namespace OsEngine.Market.Servers.Transaq
         {
             if (ServerStatus != ServerConnectStatus.Disconnect)
             {
-                                    SendLogMessage("Transaq client disconnected ", LogMessageType.System);
+                SendLogMessage("Transaq client disconnected ", LogMessageType.System);
 
                 ServerStatus = ServerConnectStatus.Disconnect;
                 DisconnectEvent?.Invoke();
@@ -429,6 +430,94 @@ namespace OsEngine.Market.Servers.Transaq
 
         private List<SecurityInfo> _secsSpecification = new List<SecurityInfo>();
 
+        private void ThreadUpdateSecurity()
+        {
+            while (true)
+            {
+                if (ServerStatus == ServerConnectStatus.Disconnect)
+                {
+                    Thread.Sleep(1000);
+                    continue;
+                }
+
+                if(!_transaqSecuritiesInString.IsEmpty)
+                {
+                    while (true)
+                    {
+                        Thread.Sleep(500);
+                        if (_lastUpdateSecurityArrayTime == DateTime.MinValue)
+                        {
+                            continue;
+                        }
+                        if (_lastUpdateSecurityArrayTime.AddSeconds(3) > DateTime.Now)
+                        {
+                            continue;
+                        }
+
+                        break;
+                    }
+
+                    while (_transaqSecuritiesInString.IsEmpty == false)
+                    {
+                        string curArray = null;
+
+                        if (_transaqSecuritiesInString.TryDequeue(out curArray))
+                        {
+                            CreateSecurities(curArray);
+                        }
+                    }
+
+                    _securities.RemoveAll(s => s == null);
+
+                    if (_securities.Count == 0)
+                    {
+                        return;
+                    }
+
+                    if (_secsSpecification != null)
+                    {
+                        for (int i = 0; i < _secsSpecification.Count; i++)
+                        {
+                            SecurityInfo secInfo = _secsSpecification[i];
+
+                            for (int j = 0; j < _securities.Count; j++)
+                            {
+                                Security secCur = _securities[j];
+
+                                if (secCur.NameId == secInfo.Secid)
+                                {
+                                    if (string.IsNullOrEmpty(secInfo.Maxprice) == false)
+                                    {
+                                        secCur.PriceLimitHigh = secInfo.Maxprice.ToDecimal();
+                                    }
+
+                                    if (string.IsNullOrEmpty(secInfo.Minprice) == false)
+                                    {
+                                        secCur.PriceLimitLow = secInfo.Minprice.ToDecimal();
+                                    }
+
+                                    if (string.IsNullOrEmpty(secInfo.Buy_deposit) == false)
+                                    {
+                                        secCur.Go = secInfo.Buy_deposit.ToDecimal();
+                                    }
+
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    SecurityEvent?.Invoke(_securities);
+
+                    SendLogMessage("Securities count: " + _securities.Count, LogMessageType.System);
+                }
+                else
+                {
+                    Thread.Sleep(10000);
+                }
+            }
+        }
+
         private void UpdateSecurity(SecurityInfo secs)
         {
             _lastUpdateSecurityArrayTime = DateTime.Now;
@@ -492,84 +581,6 @@ namespace OsEngine.Market.Servers.Transaq
         }
 
         private DateTime _lastUpdateSecurityArrayTime;
-
-        private void CreateSecurities()
-        {
-
-            while (true)
-            {
-                Thread.Sleep(500);
-                if (_lastUpdateSecurityArrayTime == DateTime.MinValue)
-                {
-                    continue;
-                }
-                if (_lastUpdateSecurityArrayTime.AddSeconds(3) > DateTime.Now)
-                {
-                    continue;
-                }
-
-                break;
-            }
-
-            DateTime timeStart = DateTime.Now;
-
-            while (_transaqSecuritiesInString.IsEmpty == false)
-            {
-                string curArray = null;
-
-                if (_transaqSecuritiesInString.TryDequeue(out curArray))
-                {
-                    CreateSecurities(curArray);
-                }
-            }
-
-            _securities.RemoveAll(s => s == null);
-
-            if (_securities.Count == 0)
-            {
-                return;
-            }
-
-            if (_secsSpecification != null)
-            {
-                for (int i = 0; i < _secsSpecification.Count; i++)
-                {
-                    SecurityInfo secInfo = _secsSpecification[i];
-
-                    for (int j = 0; j < _securities.Count; j++)
-                    {
-                        Security secCur = _securities[j];
-
-                        if (secCur.NameId == secInfo.Secid)
-                        {
-                            if (string.IsNullOrEmpty(secInfo.Maxprice) == false)
-                            {
-                                secCur.PriceLimitHigh = secInfo.Maxprice.ToDecimal();
-                            }
-
-                            if (string.IsNullOrEmpty(secInfo.Minprice) == false)
-                            {
-                                secCur.PriceLimitLow = secInfo.Minprice.ToDecimal();
-                            }
-
-                            if (string.IsNullOrEmpty(secInfo.Buy_deposit) == false)
-                            {
-                                secCur.Go = secInfo.Buy_deposit.ToDecimal();
-                            }
-
-                            break;
-                        }
-                    }
-                }
-            }
-
-            SecurityEvent?.Invoke(_securities);
-
-            TimeSpan timeOnWork = DateTime.Now - timeStart;
-
-            SendLogMessage("Time securities add: " + timeOnWork.ToString(), LogMessageType.System);
-            SendLogMessage("Securities count: " + _securities.Count, LogMessageType.System);
-        }
 
         private void CreateSecurities(string data)
         {
