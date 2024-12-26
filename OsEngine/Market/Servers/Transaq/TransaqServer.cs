@@ -65,7 +65,7 @@ namespace OsEngine.Market.Servers.Transaq
     public class TransaqServerRealization : IServerRealization
     {
         #region 1 Constructor, Status, Connection
-        
+
         public TransaqServerRealization()
         {
             ServerStatus = ServerConnectStatus.Disconnect;
@@ -127,6 +127,13 @@ namespace OsEngine.Market.Servers.Transaq
 
         public void Connect()
         {
+            DateTime nowInMoscow = DateTime.Now.ToUniversalTime().AddHours(3);
+            if (nowInMoscow.Hour > 5 &&
+                nowInMoscow.Hour < 6)
+            {
+                return;
+            }
+
             string login = ((ServerParameterString)ServerParameters[0]).Value;
             string password = ((ServerParameterPassword)ServerParameters[1]).Value;
             string serverIp = ((ServerParameterString)ServerParameters[2]).Value;
@@ -145,7 +152,7 @@ namespace OsEngine.Market.Servers.Transaq
             {
                 _isDisposed = false;
 
-                ConnectorInitialize();
+                _isLibraryInitialized = ConnectorInitialize();
 
                 // formation of the command text / формирование текста команды
                 string cmd = "<command id=\"connect\">";
@@ -224,15 +231,19 @@ namespace OsEngine.Market.Servers.Transaq
             }
         }
 
+        private bool _isLibraryInitialized = false;
+
         public void Dispose()
         {
             try
             {
-                if (ServerStatus == ServerConnectStatus.Connect)
+                if (_isLibraryInitialized == true)
                 {
                     Disconnect();
                     Thread.Sleep(2000);
                     bool res = ConnectorUnInitialize();
+
+                    _isLibraryInitialized = !res;
 
                     if (res)
                     {
@@ -256,7 +267,9 @@ namespace OsEngine.Market.Servers.Transaq
 
                 _cancellationTokenSource?.Cancel();
 
-                _allTicks?.Clear(); //???
+                _allTicks?.Clear();
+
+                _newMessage = new ConcurrentQueue<string>();
 
                 _transaqSecuritiesInString = new ConcurrentQueue<string>();
 
@@ -267,8 +280,6 @@ namespace OsEngine.Market.Servers.Transaq
                 _mdQueue = new ConcurrentQueue<List<Quote>>();
 
                 _myTradesQueue = new ConcurrentQueue<List<TransaqEntity.Trade>>();
-
-                _newMessage = new ConcurrentQueue<string>();
 
                 _tradesQueue = new ConcurrentQueue<List<TransaqEntity.Trade>>();
 
@@ -345,10 +356,10 @@ namespace OsEngine.Market.Servers.Transaq
 
         void Disconnected()
         {
-            SendLogMessage("Transaq client disconnected ", LogMessageType.System);
-
             if (ServerStatus != ServerConnectStatus.Disconnect)
             {
+                                    SendLogMessage("Transaq client disconnected ", LogMessageType.System);
+
                 ServerStatus = ServerConnectStatus.Disconnect;
                 DisconnectEvent?.Invoke();
             }
@@ -1095,7 +1106,6 @@ namespace OsEngine.Market.Servers.Transaq
             cmd += "<filter>true</filter>";
             cmd += "</command>";
 
-            // sending command / Ð¾Ñ‚Ð¿Ñ€Ð°Ð²ÐºÐ° ÐºÐ¾Ð¼Ð°Ð½Ð´Ñ‹
             string res = ConnectorSendCommand(cmd);
 
             if (res != "<result success=\"true\"/>")
@@ -1109,7 +1119,6 @@ namespace OsEngine.Market.Servers.Transaq
 
             while (true)
             {
-
                 try
                 {
                     ticks = _allTicks.Where(x => x.Seccode == security.Name).ToList();
@@ -1158,7 +1167,6 @@ namespace OsEngine.Market.Servers.Transaq
             }
 
             return trades;
-
         }
 
         public List<Candle> GetCandleDataToSecurity(Security security, TimeFrameBuilder timeFrameBuilder, DateTime startTime, DateTime endTime,
@@ -1888,6 +1896,7 @@ namespace OsEngine.Market.Servers.Transaq
                             {
                                 _transaqSecuritiesInString.Enqueue(data);
                                 _lastUpdateSecurityArrayTime = DateTime.Now;
+
                             }
                             else if (data.StartsWith("<clientlimits"))
                             {
@@ -1939,6 +1948,7 @@ namespace OsEngine.Market.Servers.Transaq
                                 }
                                 else if (status.Connected == "false")
                                 {
+
                                     Disconnected();
                                 }
                                 else if (status.Connected == "error")
@@ -1969,7 +1979,7 @@ namespace OsEngine.Market.Servers.Transaq
                             }
                             else
                             {
-                                SendLogMessage(data, LogMessageType.System);
+                                SendLogMessage(data, LogMessageType.Error);
                             }
                         }
                     }
@@ -2489,7 +2499,6 @@ namespace OsEngine.Market.Servers.Transaq
                 SendLogMessage(e.ToString(), LogMessageType.Error);
                 return null;
             }
-
         }
 
         #endregion
