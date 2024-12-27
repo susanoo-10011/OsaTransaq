@@ -20,6 +20,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Forms.DataVisualization.Charting;
 using System.Xml;
 using System.Xml.Serialization;
 using Candle = OsEngine.Entity.Candle;
@@ -54,11 +55,6 @@ namespace OsEngine.Market.Servers.Transaq
             ServerParameters[9].Comment = OsLocalization.Market.Label108;
             ServerParameters[10].Comment = OsLocalization.Market.Label105;
 
-        }
-
-        public void GetCandleHistory(CandleSeries series)
-        {
-            ((TransaqServerRealization)ServerRealization).GetCandleHistory(series);
         }
     }
 
@@ -440,7 +436,7 @@ namespace OsEngine.Market.Servers.Transaq
                     continue;
                 }
 
-                if(!_transaqSecuritiesInString.IsEmpty)
+                if (!_transaqSecuritiesInString.IsEmpty)
                 {
                     while (true)
                     {
@@ -993,7 +989,7 @@ namespace OsEngine.Market.Servers.Transaq
                 portfolio.Number = client;
             }
 
-            for (int i = 0; i< allSecurity.Count;i++)
+            for (int i = 0; i < allSecurity.Count; i++)
             {
                 XmlNode node = (XmlNode)allSecurity[i];
 
@@ -1008,9 +1004,9 @@ namespace OsEngine.Market.Servers.Transaq
 
                 decimal lot = 1;
 
-                for(int j = 0; j < _securities.Count; j++)
+                for (int j = 0; j < _securities.Count; j++)
                 {
-                    if(pos.SecurityNameCode == _securities[j].Name)
+                    if (pos.SecurityNameCode == _securities[j].Name)
                     {
                         lot = _securities[j].Lot;
                     }
@@ -1196,13 +1192,86 @@ namespace OsEngine.Market.Servers.Transaq
             return null;
         }
 
-        private RateGate _rateGateCandle = new RateGate(1, TimeSpan.FromMilliseconds(300));
-
-        public void GetCandleHistory(CandleSeries series)
+        public List<Candle> GetLastCandleHistory(Security security, TimeFrameBuilder timeFrameBuilder, int candleCount)
         {
             _rateGateCandle.WaitToProceed();
-            Task.Run(() => GetCandles(series, 1), _cancellationToken);
+
+            try
+            {
+                int newTf;
+                int oldTf;
+                string needPeriodId = GetNeedIdPeriod(timeFrameBuilder.TimeFrame, out newTf, out oldTf);
+
+                string cmd = "<command id=\"gethistorydata\">";
+                cmd += "<security>";
+                cmd += "<board>" + security.NameClass + "</board>";
+                cmd += "<seccode>" + security.Name + "</seccode>";
+                cmd += "</security>";
+                cmd += "<period>" + needPeriodId + "</period>";
+                cmd += "<count>" + candleCount + "</count>";
+                cmd += "<reset>" + "true" + "</reset>";
+                cmd += "</command>";
+
+                // sending command / отправка команды
+                string res = ConnectorSendCommand(cmd);
+
+                if (res != "<result success=\"true\"/>")
+                {
+                    SendLogMessage(OsLocalization.Market.Message95 + "  " + res, LogMessageType.Error);
+
+                    return null;
+                }
+
+                DateTime startLoadingTime = DateTime.Now;
+
+                while (startLoadingTime.AddSeconds(10) > DateTime.Now)
+                {
+                    TransaqEntity.Candles candles = null;
+
+                    for (int i = 0; i < _allCandleSeries.Count; i++)
+                    {
+                        TransaqEntity.Candles curSeries = _allCandleSeries[i];
+
+                        if (curSeries.Seccode == security.Name && curSeries.Period == needPeriodId)
+                        {
+                            candles = curSeries;
+                            break;
+                        }
+                    }
+
+                    if (candles == null)
+                    {
+                        Thread.Sleep(200);
+                        continue;
+                    }
+
+                    List<Candle> donorCandles = ParseCandles(candles);
+
+                    if ((timeFrameBuilder.TimeFrame == TimeFrame.Min1 && needPeriodId == "1") ||
+                        (timeFrameBuilder.TimeFrame == TimeFrame.Min5 && needPeriodId == "2") ||
+                        (timeFrameBuilder.TimeFrame == TimeFrame.Min15 && needPeriodId == "3") ||
+                        (timeFrameBuilder.TimeFrame == TimeFrame.Hour1 && needPeriodId == "4"))
+                    {
+                        return donorCandles;
+                    }
+                    else
+                    {
+                        return BuildCandles(donorCandles, newTf, oldTf);
+                    }
+                }
+
+                SendLogMessage($"No candle data was received for the security {security.Name}", LogMessageType.Error);
+
+                return null;
+            }
+            catch (Exception ex)
+            {
+                SendLogMessage("Error GetCandles  " + ex.ToString(), LogMessageType.Error);
+                return null;
+            }
         }
+
+        private RateGate _rateGateCandle = new RateGate(1, TimeSpan.FromMilliseconds(300));
 
         private void GetCandles(CandleSeries series, int countTry)
         {
@@ -1351,17 +1420,17 @@ namespace OsEngine.Market.Servers.Transaq
             {
                 List<Candle> osCandles = new List<Candle>();
 
-                foreach (TransaqEntity.Candle candle in candles.Candle)
+                for(int i = 0; i < candles.Candle.Count; i++)
                 {
-                    osCandles.Add(new Candle()
-                    {
-                        Open = candle.Open.ToDecimal(),
-                        High = candle.High.ToDecimal(),
-                        Low = candle.Low.ToDecimal(),
-                        Close = candle.Close.ToDecimal(),
-                        Volume = candle.Volume.ToDecimal(),
-                        TimeStart = DateTime.Parse(candle.Date),
-                    });
+                    Candle osCandle = new Candle();
+                    osCandle.Open = candles.Candle[i].Open.ToDecimal();
+                    osCandle.High = candles.Candle[i].High.ToDecimal();
+                    osCandle.Low = candles.Candle[i].Low.ToDecimal();
+                    osCandle.Close = candles.Candle[i].Close.ToDecimal();
+                    osCandle.Volume = candles.Candle[i].Volume.ToDecimal();
+                    osCandle.TimeStart = DateTime.Parse(candles.Candle[i].Date);
+
+                    osCandles.Add(osCandle);
                 }
 
                 return osCandles;
@@ -1557,11 +1626,6 @@ namespace OsEngine.Market.Servers.Transaq
                     oldTf = 0;
                     return "5";
             }
-        }
-
-        public List<Candle> GetLastCandleHistory(Security security, TimeFrameBuilder timeFrameBuilder, int candleCount)
-        {
-            return null;
         }
 
         private List<TransaqEntity.Candles> _allCandleSeries = new List<TransaqEntity.Candles>();
@@ -1936,6 +2000,10 @@ namespace OsEngine.Market.Servers.Transaq
                                 TransaqEntity.Candles newCandles = Deserialize<TransaqEntity.Candles>(data);
 
                                 _allCandleSeries.Add(newCandles);
+                            }
+                            else if (data.StartsWith("<candlekinds>"))
+                            {
+
                             }
                             else if (data.StartsWith("<messages>"))
                             {

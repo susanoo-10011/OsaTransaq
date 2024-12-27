@@ -129,7 +129,7 @@ namespace OsEngine.Market.Servers.Transaq
 
         public bool UseStandartCandlesStarter
         {
-            get { return false; }
+            get { return true; }
         }
 
         public bool IsUseLotToCalculateProfit
