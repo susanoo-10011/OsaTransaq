@@ -897,7 +897,7 @@ namespace OsEngine.Market.Servers.Transaq
 
                 if (!string.IsNullOrEmpty(clientInfo.Union))
                 {
-                    var needClient = _clients.Find(c => string.IsNullOrEmpty(clientInfo.Union));
+                    Client needClient = _clients.Find(c => string.IsNullOrEmpty(clientInfo.Union));
 
                     if (needClient == null)
                     {
@@ -954,17 +954,17 @@ namespace OsEngine.Market.Servers.Transaq
                 return null;
             }
 
-            var union = root.GetAttribute("union");
-            var client = root.GetAttribute("client");
+            string union = root.GetAttribute("union");
+            string client = root.GetAttribute("client");
 
-            var openEquity = root.SelectSingleNode("open_equity");
-            var equity = root.SelectSingleNode("equity");
-            var block = root.SelectSingleNode("go");
-            var cover = root.SelectSingleNode("cover");
+            XmlNode openEquity = root.SelectSingleNode("open_equity");
+            XmlNode equity = root.SelectSingleNode("equity");
+            XmlNode block = root.SelectSingleNode("go");
+            XmlNode cover = root.SelectSingleNode("cover");
 
-            var allSecurity = root.GetElementsByTagName("security");
+            XmlNodeList allSecurity = root.GetElementsByTagName("security");
 
-            var portfolio = new Portfolio();
+            Portfolio portfolio = new Portfolio();
 
             if (openEquity != null)
             {
@@ -993,11 +993,11 @@ namespace OsEngine.Market.Servers.Transaq
                 portfolio.Number = client;
             }
 
-            foreach (var security in allSecurity)
+            for (int i = 0; i< allSecurity.Count;i++)
             {
-                var node = (XmlNode)security;
+                XmlNode node = (XmlNode)allSecurity[i];
 
-                var pos = new PositionOnBoard();
+                PositionOnBoard pos = new PositionOnBoard();
 
                 pos.SecurityNameCode = node.SelectSingleNode("seccode")?.InnerText;
                 pos.PortfolioName = portfolio.Number;
@@ -1006,15 +1006,25 @@ namespace OsEngine.Market.Servers.Transaq
                 XmlNode buyNode = node.SelectSingleNode("bought");
                 XmlNode sellNode = node.SelectSingleNode("sold");
 
+                decimal lot = 1;
+
+                for(int j = 0; j < _securities.Count; j++)
+                {
+                    if(pos.SecurityNameCode == _securities[j].Name)
+                    {
+                        lot = _securities[j].Lot;
+                    }
+                }
+
                 if (beginNode != null)
                 {
-                    pos.ValueBegin = beginNode.InnerText.ToDecimal();
+                    pos.ValueBegin = beginNode.InnerText.ToDecimal() / lot;
                 }
 
                 if (buyNode != null &&
                     sellNode != null)
                 {
-                    pos.ValueCurrent = pos.ValueBegin + buyNode.InnerText.ToDecimal() - sellNode.InnerText.ToDecimal();
+                    pos.ValueCurrent = pos.ValueBegin + buyNode.InnerText.ToDecimal() / lot - sellNode.InnerText.ToDecimal() / lot;
                 }
 
                 portfolio.SetNewPosition(pos);
@@ -1032,7 +1042,7 @@ namespace OsEngine.Market.Servers.Transaq
                     return;
                 }
 
-                var needPortfolio = _portfolios.Find(p => p.Number == clientLimits.Client);
+                Portfolio needPortfolio = _portfolios.Find(p => p.Number == clientLimits.Client);
 
                 if (needPortfolio != null)
                 {
@@ -1067,16 +1077,16 @@ namespace OsEngine.Market.Servers.Transaq
 
             if (transaqPositions.Forts_position.Count == 0)
             {
-                foreach (var portfolio in _portfolios)
+                foreach (Portfolio portfolio in _portfolios)
                 {
                     portfolio.ClearPositionOnBoard();
                 }
             }
             else
             {
-                foreach (var fortsPosition in transaqPositions.Forts_position)
+                foreach (Forts_position fortsPosition in transaqPositions.Forts_position)
                 {
-                    var needPortfolio = _portfolios.Find(p => p.Number == fortsPosition.Client);
+                    Portfolio needPortfolio = _portfolios.Find(p => p.Number == fortsPosition.Client);
 
                     if (needPortfolio != null)
                     {
@@ -1145,7 +1155,7 @@ namespace OsEngine.Market.Servers.Transaq
 
                 if (lastTickTime >= actualTime)
                 {
-                    foreach (var tick in ticks)
+                    foreach (Tick tick in ticks)
                     {
                         trades.Add(new Trade()
                         {
@@ -1341,7 +1351,7 @@ namespace OsEngine.Market.Servers.Transaq
             {
                 List<Candle> osCandles = new List<Candle>();
 
-                foreach (var candle in candles.Candle)
+                foreach (TransaqEntity.Candle candle in candles.Candle)
                 {
                     osCandles.Add(new Candle()
                     {
@@ -1665,7 +1675,7 @@ namespace OsEngine.Market.Servers.Transaq
 
                 if (order.PortfolioNumber.StartsWith("United_"))
                 {
-                    var union = order.PortfolioNumber.Split('_')[1];
+                    string union = order.PortfolioNumber.Split('_')[1];
                     cmd += "<union>" + union + "</union>";
                 }
                 else
@@ -2250,7 +2260,7 @@ namespace OsEngine.Market.Servers.Transaq
 
             Dictionary<string, List<Quote>> sortedQuotes = new Dictionary<string, List<Quote>>();
 
-            foreach (var quote in quotes)
+            foreach (Quote quote in quotes)
             {
                 if (!sortedQuotes.ContainsKey(quote.Seccode))
                 {
@@ -2260,7 +2270,7 @@ namespace OsEngine.Market.Servers.Transaq
                 sortedQuotes[quote.Seccode].Add(quote);
             }
 
-            foreach (var sortedQuote in sortedQuotes)
+            foreach (KeyValuePair<string, List<Quote>> sortedQuote in sortedQuotes)
             {
                 MarketDepth needDepth = _depths.Find(depth => depth.SecurityNameCode == sortedQuote.Value[0].Seccode);
 
@@ -2279,7 +2289,7 @@ namespace OsEngine.Market.Servers.Transaq
                     }
                     if (sortedQuote.Value[i].Buy > 0)
                     {
-                        var needLevel = needDepth.Bids.Find(level => level.Price == sortedQuote.Value[i].Price);
+                        MarketDepthLevel needLevel = needDepth.Bids.Find(level => level.Price == sortedQuote.Value[i].Price);
                         if (needLevel != null)
                         {
                             needLevel.Bid = sortedQuote.Value[i].Buy;
@@ -2321,7 +2331,7 @@ namespace OsEngine.Market.Servers.Transaq
                     }
                     if (sortedQuote.Value[i].Sell > 0)
                     {
-                        var needLevel = needDepth.Asks.Find(level => level.Price == sortedQuote.Value[i].Price);
+                        MarketDepthLevel needLevel = needDepth.Asks.Find(level => level.Price == sortedQuote.Value[i].Price);
                         if (needLevel != null)
                         {
                             needLevel.Ask = sortedQuote.Value[i].Sell;
@@ -2363,7 +2373,7 @@ namespace OsEngine.Market.Servers.Transaq
                     }
                     if (sortedQuote.Value[i].Buy == -1)
                     {
-                        var deleteLevelIndex = needDepth.Bids.FindIndex(level => level.Price == sortedQuote.Value[i].Price);
+                        int deleteLevelIndex = needDepth.Bids.FindIndex(level => level.Price == sortedQuote.Value[i].Price);
                         if (deleteLevelIndex != -1)
                         {
                             needDepth.Bids.RemoveAt(deleteLevelIndex);
@@ -2371,7 +2381,7 @@ namespace OsEngine.Market.Servers.Transaq
                     }
                     if (sortedQuote.Value[i].Sell == -1)
                     {
-                        var deleteLevelIndex = needDepth.Asks.FindIndex(level => level.Price == sortedQuote.Value[i].Price);
+                        int deleteLevelIndex = needDepth.Asks.FindIndex(level => level.Price == sortedQuote.Value[i].Price);
                         if (deleteLevelIndex != -1)
                         {
                             needDepth.Asks.RemoveAt(deleteLevelIndex);
@@ -2528,7 +2538,7 @@ namespace OsEngine.Market.Servers.Transaq
         public T Deserialize<T>(string data)
         {
             T newData;
-            var formatter = new XmlSerializer(typeof(T));
+            XmlSerializer formatter = new XmlSerializer(typeof(T));
             using (StringReader fs = new StringReader(data))
             {
                 newData = (T)formatter.Deserialize(fs);
