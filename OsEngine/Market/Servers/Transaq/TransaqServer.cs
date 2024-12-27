@@ -471,7 +471,7 @@ namespace OsEngine.Market.Servers.Transaq
 
                     if (_securities.Count == 0)
                     {
-                        return;
+                        continue;
                     }
 
                     if (_secsSpecification != null)
