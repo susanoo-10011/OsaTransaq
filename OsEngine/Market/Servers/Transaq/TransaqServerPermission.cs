@@ -169,7 +169,7 @@ namespace OsEngine.Market.Servers.Transaq
 
         public bool ManuallyClosePositionOnBoard_IsOn
         {
-            get { return false; }
+            get { return true; }
         }
 
         public string[] ManuallyClosePositionOnBoard_ValuesForTrimmingName
